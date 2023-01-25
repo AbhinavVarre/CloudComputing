@@ -2,6 +2,7 @@ import ast
 import boto3
 import logging
 import os
+from os import path
 import sys
 import traceback
 
@@ -9,6 +10,7 @@ LOG_FILE_NAME = 'output.log'
 
 # Change region to match with the default region that you setup when configuring your AWS CLI
 REGION = 'us-west-2'
+
 
 class S3Handler:
     """S3 handler."""
@@ -25,13 +27,15 @@ class S3Handler:
     def help(self):
         print("Supported Commands:")
         print("1. createdir <bucket_name>")
-        print("2. upload <source_file_name> <bucket_name> [<dest_object_name>]")
-        print("3. download <dest_object_name> <bucket_name> [<source_file_name>]")
+        print(
+            "2. upload <source_file_name> <bucket_name> [<dest_object_name>]")
+        print(
+            "3. download <dest_object_name> <bucket_name> [<source_file_name>]")
         print("4. delete <dest_object_name> <bucket_name>")
         print("5. deletedir <bucket_name>")
         print("6. find <pattern> <bucket_name> -- e.g.: find txt bucket1 --")
         print("7. listdir [<bucket_name>]")
-    
+
     def _error_messages(self, issue):
         error_message_dict = {}
         error_message_dict['operation_not_permitted'] = 'Not authorized to access resource.'
@@ -61,7 +65,7 @@ class S3Handler:
         except Exception as e:
             # print(e)
             # traceback.print_exc(file=sys.stdout)
-            
+
             response_code = e.response['Error']['Code']
             if response_code == '404':
                 return False
@@ -93,24 +97,44 @@ class S3Handler:
 
     def listdir(self, bucket_name):
         # If bucket_name is provided, check that bucket exits.
-        
+        try:
         # If bucket_name is empty then display the names of all the buckets
-        
+            if bucket_name == "":
+                response = self.client.list_buckets()
+                for bucket in response['Buckets']:
+                    print({bucket["Name"]})
         # If bucket_name is provided then display the names of all objects in the bucket
-        return self._error_messages('not_implemented')
+            else:
+                if not self._get(bucket_name):
+                    return self._error_messages('non_existent_bucket')
+                response = self.client.list_objects(Bucket=bucket_name)
+                # print(response)
+                for objects in response['Contents']:
+                    print({objects['Key']})
+        except Exception as e:
+            print(e)
+            raise e
 
     def upload(self, source_file_name, bucket_name, dest_object_name=''):
         # 1. Parameter Validation
         #    - source_file_name exits in current directory
-        #    - bucket_name exists
-        # 2. If dest_object_name is not specified then use the source_file_name as dest_object_name
-
-        # 3. SDK call
+        try:
+            if path.exists(source_file_name):
+            #    - bucket_name exists
+                if not self._get(bucket_name):
+                    return self._error_messages('non_existent_bucket')
+            # 2. If dest_object_name is not specified then use the source_file_name as dest_object_name
+                if not dest_object_name:
+                    dest_object_name = source_file_name
+            # 3. SDK call
+                self.client.upload_file(Filename = source_file_name,Bucket=bucket_name,Key=dest_object_name)
+                # Success response
+                operation_successful = ('File %s uploaded to directory %s.' % (source_file_name, bucket_name))
+                return operation_successful
         #    - When uploading the source_file_name and add it to object's meta-data
-
-        # Success response
-        # operation_successful = ('File %s uploaded to directory %s.' % (source_file_name, bucket_name))
-
+        except Exception as e:
+            print(e)
+            raise e
         return self._error_messages('not_implemented')
 
 
@@ -171,9 +195,11 @@ class S3Handler:
             # source_file_name and bucket_name are compulsory; dest_object_name is optional
             # Use self._error_messages['incorrect_parameter_number'] if number of parameters is less
             # than number of compulsory parameters
-            source_file_name = ''
-            bucket_name = ''
+            source_file_name = parts[1]
+            bucket_name = parts[2]
             dest_object_name = ''
+            if len(parts) > 3:
+                dest_object_name = parts[3]
             response = self.upload(source_file_name, bucket_name, dest_object_name)
         elif parts[0] == 'download':
             # Figure out parameters from command_string
@@ -197,6 +223,8 @@ class S3Handler:
             response = self.find(pattern, bucket_name)
         elif parts[0] == 'listdir':
             bucket_name = ''
+            if len(parts) > 1:
+                bucket_name = parts[1]
             response = self.listdir(bucket_name)
         else:
             response = "Command not recognized."
@@ -218,7 +246,7 @@ def main():
             # Remove multiple whitespaces, if they exist
             command_string = " ".join(command_string.split())
             
-            if command_string == 'exit':
+            if command_string == 'exit' or command_string == 'quit' or command_string == 'q':
                 print("Good bye!")
                 exit()
             elif command_string == 'help':

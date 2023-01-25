@@ -38,7 +38,7 @@ Vagrant.configure("2") do |config|
   # Bridged networks make the machine appear as another physical device on
   # your network.
   # config.vm.network "public_network"
-  config.vm.network "forwarded_port", guest: 5000, host: 5000
+  #config.vm.network "forwarded_port", guest: 5000, host: 5000
   config.vm.network "forwarded_port", guest: 9090, host: 9090
   config.vm.network "forwarded_port", guest: 5002, host: 5002
   config.vm.network "forwarded_port", guest: 65500, host: 65500
