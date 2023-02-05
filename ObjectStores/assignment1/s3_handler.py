@@ -5,6 +5,7 @@ import os
 from os import path
 import sys
 import traceback
+import time
 
 LOG_FILE_NAME = 'output.log'
 
@@ -119,62 +120,97 @@ class S3Handler:
         # 1. Parameter Validation
         #    - source_file_name exits in current directory
         try:
-            if path.exists(source_file_name):
+            if not path.exists(source_file_name):
+                return self._error_messages('missing_source_file')
             #    - bucket_name exists
-                if not self._get(bucket_name):
-                    return self._error_messages('non_existent_bucket')
-            # 2. If dest_object_name is not specified then use the source_file_name as dest_object_name
-                if not dest_object_name:
-                    dest_object_name = source_file_name
-            # 3. SDK call
-                self.client.upload_file(Filename = source_file_name,Bucket=bucket_name,Key=dest_object_name)
-                # Success response
-                operation_successful = ('File %s uploaded to directory %s.' % (source_file_name, bucket_name))
-                return operation_successful
+            if not self._get(bucket_name):
+                return self._error_messages('non_existent_bucket')
+        # 2. If dest_object_name is not specified then use the source_file_name as dest_object_name
+            if not dest_object_name:
+                dest_object_name = source_file_name
+        # 3. SDK call
+            self.client.upload_file(Filename = source_file_name,Bucket=bucket_name,Key=dest_object_name)
+            # Success response
+            operation_successful = ('File %s uploaded to directory %s.' % (source_file_name, bucket_name))
+            return operation_successful
         #    - When uploading the source_file_name and add it to object's meta-data
         except Exception as e:
             print(e)
             raise e
-        return self._error_messages('not_implemented')
 
 
     def download(self, dest_object_name, bucket_name, source_file_name=''):
         # if source_file_name is not specified then use the dest_object_name as the source_file_name
-        # If the current directory already contains a file with source_file_name then move it as a backup
+        if not source_file_name:
+            source_file_name = dest_object_name
+        # If the current directory already contains a file with source_file_name then move it as a backup            
         # with following format: <source_file_name.bak.current_time_stamp_in_millis>
-        
+
+        #TODO add the time stamp to extension
+        if path.exists(source_file_name):
+            source_file_name += '.bak'
         # Parameter Validation
-        
+        try:
+            self.client.head_object(Bucket= bucket_name, Key= dest_object_name)
+        except Exception as e:
+                return self._error_messages('missing_source_file')
+        if not self._get(bucket_name):
+            return self._error_messages('non_existent_bucket')
         # SDK Call
-
-        # Success response
-        # operation_successful = ('File %s downloaded from directory %s.' % (dest_object_name, bucket_name))
-
-        return self._error_messages('not_implemented')
-
+        try:
+            self.client.download_file(Bucket = bucket_name, Key = dest_object_name, Filename = source_file_name)
+            # Success response
+            operation_successful = ('File %s downloaded from directory %s.' % (dest_object_name, bucket_name))
+            return operation_successful
+        except Exception as e:
+            print(e)
+            return self._error_messages('non_existent_object')
 
     def delete(self, dest_object_name, bucket_name):
-        
         # Success response
         # operation_successful = ('File %s deleted from directory %s.' % (dest_object_name, bucket_name))
+        try:
+            self.client.head_object(Bucket= bucket_name, Key= dest_object_name)
+        except Exception as e:
+                return self._error_messages('missing_source_file')
+        if not self._get(bucket_name):
+            return self._error_messages('non_existent_bucket')
         
-        return self._error_messages('not_implemented')
+        try:
+            self.client.delete_object(Bucket = bucket_name, Key = dest_object_name)
+        except Exception as e:
+            print(e)
+            return self._error_messages('non_existent_object')
+        
+        print('object was deleted')
 
 
     def deletedir(self, bucket_name):
         # Delete the bucket only if it is empty
-        
+        if not self._get(bucket_name):
+            return self._error_messages('non_existent_bucket')
         # Success response
         # operation_successful = ("Deleted directory %s." % bucket_name)
-        
-        return self._error_messages('not_implemented')
+        try:
+            self.client.delete_bucket(Bucket = bucket_name)
+        except Exception as e:
+            print(e)
+            return self._error_messages('non_empty_bucket')
+        print('directory was deleted')
 
 
     def find(self, pattern, bucket_name=''):
         # Return object names that match the given pattern
+        list = []
+        try:
+            response = self.client.list_objects_v2(Bucket = bucket_name)
+            for bucket in response['Contents']:
+                if pattern in (''.join(bucket["Key"])):
+                    list.append((''.join(bucket["Key"])))
+            print(list)
+        except Exception as e:
+            print(e)
 
-        
-        return self._error_messages('not_implemented')
 
 
     def dispatch(self, command_string):
@@ -206,20 +242,22 @@ class S3Handler:
             # dest_object_name and bucket_name are compulsory; source_file_name is optional
             # Use self._error_messages['incorrect_parameter_number'] if number of parameters is less
             # than number of compulsory parameters
+            dest_object_name = parts[1]
+            bucket_name = parts[2]
             source_file_name = ''
-            bucket_name = ''
-            dest_object_name = ''
+            if len(parts) > 3:
+                source_file_name = parts[3]
             response = self.download(dest_object_name, bucket_name, source_file_name)
         elif parts[0] == 'delete':
-            dest_object_name = ''
-            bucket_name = ''
+            dest_object_name = parts[1]
+            bucket_name = parts[2]
             response = self.delete(dest_object_name, bucket_name)
         elif parts[0] == 'deletedir':
-            bucket_name = ''
+            bucket_name = parts[1]
             response = self.deletedir(bucket_name)
         elif parts[0] == 'find':
-            pattern = ''
-            bucket_name = ''
+            pattern = parts[1]
+            bucket_name = parts[2]
             response = self.find(pattern, bucket_name)
         elif parts[0] == 'listdir':
             bucket_name = ''
