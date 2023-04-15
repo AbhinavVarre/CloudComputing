@@ -40,6 +40,7 @@ class S3Handler:
     def _error_messages(self, issue):
         error_message_dict = {}
         error_message_dict['operation_not_permitted'] = 'Not authorized to access resource.'
+        error_message_dict['invalid_directory_name'] = 'Directory name is invalid.'
         error_message_dict['incorrect_parameter_number'] = 'Incorrect number of parameters provided'
         error_message_dict['not_implemented'] = 'Functionality not implemented yet!'
         error_message_dict['bucket_name_exists'] = 'Directory already exists.'
@@ -100,18 +101,25 @@ class S3Handler:
         # If bucket_name is provided, check that bucket exits.
         try:
         # If bucket_name is empty then display the names of all the buckets
+            allbuckets = []
             if bucket_name == "":
                 response = self.client.list_buckets()
                 for bucket in response['Buckets']:
-                    print({bucket["Name"]})
+                    allbuckets.append(bucket["Name"])
+                return allbuckets
+            
         # If bucket_name is provided then display the names of all objects in the bucket
             else:
                 if not self._get(bucket_name):
                     return self._error_messages('non_existent_bucket')
                 response = self.client.list_objects(Bucket=bucket_name)
-                # print(response)
-                for objects in response['Contents']:
-                    print({objects['Key']})
+                # print(response['Contents'])
+                try:
+                    for objects in response['Contents']:
+                         allbuckets.append(objects['Key'])
+                    return allbuckets
+                except Exception as ec:
+                    return allbuckets
         except Exception as e:
             print(e)
             raise e
@@ -146,16 +154,15 @@ class S3Handler:
         # If the current directory already contains a file with source_file_name then move it as a backup            
         # with following format: <source_file_name.bak.current_time_stamp_in_millis>
 
-        #TODO add the time stamp to extension
         if path.exists(source_file_name):
-            source_file_name += '.bak'
+            source_file_name += '.bak.' + str(round(time.time()*1000))
         # Parameter Validation
+        if not self._get(bucket_name):
+            return self._error_messages('non_existent_bucket')
         try:
             self.client.head_object(Bucket= bucket_name, Key= dest_object_name)
         except Exception as e:
-                return self._error_messages('missing_source_file')
-        if not self._get(bucket_name):
-            return self._error_messages('non_existent_bucket')
+                return self._error_messages('non_existent_object')
         # SDK Call
         try:
             self.client.download_file(Bucket = bucket_name, Key = dest_object_name, Filename = source_file_name)
@@ -168,13 +175,12 @@ class S3Handler:
 
     def delete(self, dest_object_name, bucket_name):
         # Success response
-        # operation_successful = ('File %s deleted from directory %s.' % (dest_object_name, bucket_name))
+        if not self._get(bucket_name):
+            return self._error_messages('non_existent_bucket')
         try:
             self.client.head_object(Bucket= bucket_name, Key= dest_object_name)
         except Exception as e:
-                return self._error_messages('missing_source_file')
-        if not self._get(bucket_name):
-            return self._error_messages('non_existent_bucket')
+                return self._error_messages('non_existent_object')
         
         try:
             self.client.delete_object(Bucket = bucket_name, Key = dest_object_name)
@@ -182,7 +188,8 @@ class S3Handler:
             print(e)
             return self._error_messages('non_existent_object')
         
-        print('object was deleted')
+        operation_successful = ('File %s deleted from directory %s.' % (dest_object_name, bucket_name))
+        return operation_successful
 
 
     def deletedir(self, bucket_name):
@@ -190,24 +197,25 @@ class S3Handler:
         if not self._get(bucket_name):
             return self._error_messages('non_existent_bucket')
         # Success response
-        # operation_successful = ("Deleted directory %s." % bucket_name)
         try:
             self.client.delete_bucket(Bucket = bucket_name)
         except Exception as e:
-            print(e)
-            return self._error_messages('non_empty_bucket')
-        print('directory was deleted')
+            return e
+        operation_successful = ("Directory %s deleted" % bucket_name)
+        return operation_successful
 
 
     def find(self, pattern, bucket_name=''):
         # Return object names that match the given pattern
+        if not self._get(bucket_name):
+            return self._error_messages('non_existent_bucket')
         list = []
         try:
             response = self.client.list_objects_v2(Bucket = bucket_name)
             for bucket in response['Contents']:
                 if pattern in (''.join(bucket["Key"])):
                     list.append((''.join(bucket["Key"])))
-            print(list)
+            return list
         except Exception as e:
             print(e)
 
@@ -221,7 +229,7 @@ class S3Handler:
             # Figure out bucket_name from command_string
             if len(parts) > 1:
                 bucket_name = parts[1]
-                response = self.createdir(bucket_name)
+                return self.createdir(bucket_name)
             else:
                 # Parameter Validation
                 # - Bucket name is not empty
@@ -231,6 +239,8 @@ class S3Handler:
             # source_file_name and bucket_name are compulsory; dest_object_name is optional
             # Use self._error_messages['incorrect_parameter_number'] if number of parameters is less
             # than number of compulsory parameters
+            if len(parts) != 3 and len(parts) != 4:
+                return self._error_messages('incorrect_parameter_number')
             source_file_name = parts[1]
             bucket_name = parts[2]
             dest_object_name = ''
@@ -242,6 +252,8 @@ class S3Handler:
             # dest_object_name and bucket_name are compulsory; source_file_name is optional
             # Use self._error_messages['incorrect_parameter_number'] if number of parameters is less
             # than number of compulsory parameters
+            if len(parts) != 3 and len(parts) != 4:
+                return self._error_messages('incorrect_parameter_number')
             dest_object_name = parts[1]
             bucket_name = parts[2]
             source_file_name = ''
@@ -249,17 +261,25 @@ class S3Handler:
                 source_file_name = parts[3]
             response = self.download(dest_object_name, bucket_name, source_file_name)
         elif parts[0] == 'delete':
+            if len(parts) != 3:
+                return self._error_messages('incorrect_parameter_number')
             dest_object_name = parts[1]
             bucket_name = parts[2]
             response = self.delete(dest_object_name, bucket_name)
         elif parts[0] == 'deletedir':
+            if len(parts) != 2:
+                return self._error_messages('incorrect_parameter_number')
             bucket_name = parts[1]
             response = self.deletedir(bucket_name)
         elif parts[0] == 'find':
+            if len(parts) != 3:
+                return self._error_messages('incorrect_parameter_number')
             pattern = parts[1]
             bucket_name = parts[2]
             response = self.find(pattern, bucket_name)
         elif parts[0] == 'listdir':
+            if len(parts) != 1 and len(parts) != 2:
+                return self._error_messages('incorrect_parameter_number')
             bucket_name = ''
             if len(parts) > 1:
                 bucket_name = parts[1]
